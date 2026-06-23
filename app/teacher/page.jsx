@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import QRDisplay from '@/components/QRDisplay';
 
 const REFRESH_INTERVAL_SEC = 10;
@@ -53,6 +54,11 @@ const Icons = {
   Alert: () => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+  ),
+  History: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /><path d="M3.05 11a9 9 0 1 1 .5 4" /><polyline points="1 11 3 13 5 11" />
     </svg>
   ),
 };
@@ -193,6 +199,10 @@ export default function TeacherPage() {
               </>
             )}
           </div>
+          <Link href="/teacher/history" className="tp-history-btn">
+            <Icons.History />
+            <span>ประวัติ</span>
+          </Link>
         </div>
       </header>
 
