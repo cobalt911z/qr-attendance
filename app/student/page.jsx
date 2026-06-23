@@ -60,42 +60,79 @@ function StudentForm() {
   const searchParams = useSearchParams();
   const token        = searchParams.get('token');
 
-  const [studentId, setStudentId]   = useState('');
-  const [phase, setPhase]           = useState('form');
-  const [activeStep, setActiveStep] = useState(token ? 2 : 1);
-  const [resultMsg, setResultMsg]   = useState('');
-  const [errorMsg, setErrorMsg]     = useState('');
-  const [loadingMsg, setLoadingMsg] = useState('');
+  const [studentId, setStudentId]     = useState('');
+  const [phase, setPhase]             = useState('form');
+  const [activeStep, setActiveStep]   = useState(token ? 2 : 1);
+  const [resultMsg, setResultMsg]     = useState('');
+  const [errorMsg, setErrorMsg]       = useState('');
+  const [loadingMsg, setLoadingMsg]   = useState('');
+  const [sessionInfo, setSessionInfo] = useState(null);
+  const [infoLoading, setInfoLoading] = useState(!!token);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch(`/api/student/session-info?token=${token}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          setSessionInfo(data);
+          if (data.is_expired) {
+            setErrorMsg('QR Code นี้หมดอายุแล้ว กรุณาสแกนใหม่');
+          }
+        } else {
+          setErrorMsg(data.error || 'ดึงข้อมูลคาบเรียนล้มเหลว');
+        }
+      })
+      .catch(() => setErrorMsg('ไม่สามารถติดต่อเซิร์ฟเวอร์เพื่อดึงข้อมูลวิชาได้'))
+      .finally(() => setInfoLoading(false));
+  }, [token]);
+
+  const performVerify = async (lat, lng) => {
+    const fingerprint = generateFingerprint();
+    setPhase('verifying'); setLoadingMsg('กำลังยืนยันการเช็คชื่อ…');
+    try {
+      const res  = await fetch('/api/student/verify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, student_id: studentId.trim(), lat, lng, fingerprint }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setResultMsg(data.message || 'เช็คชื่อสำเร็จ');
+        setPhase('success'); setActiveStep(4);
+      } else {
+        setErrorMsg(data.error || 'เกิดข้อผิดพลาด');
+        setPhase('error'); setActiveStep(2);
+      }
+    } catch {
+      setErrorMsg('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้');
+      setPhase('error'); setActiveStep(2);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!studentId.trim()) { setErrorMsg('กรุณากรอกรหัสนักศึกษา'); return; }
     if (!token)            { setErrorMsg('ไม่พบ Token กรุณาสแกน QR Code ใหม่'); return; }
     setErrorMsg('');
+
+    if (sessionInfo?.is_expired) {
+      setErrorMsg('QR Code นี้หมดอายุแล้ว กรุณาสแกนใหม่');
+      return;
+    }
+
+    const gpsRequired = sessionInfo ? sessionInfo.gps_enabled !== false : true;
+
+    if (!gpsRequired) {
+      await performVerify(null, null);
+      return;
+    }
+
     setPhase('gps'); setActiveStep(3); setLoadingMsg('กำลังดึงตำแหน่ง GPS…');
 
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords;
-        const fingerprint = generateFingerprint();
-        setPhase('verifying'); setLoadingMsg('กำลังยืนยันการเช็คชื่อ…');
-        try {
-          const res  = await fetch('/api/student/verify', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token, student_id: studentId.trim(), lat, lng, fingerprint }),
-          });
-          const data = await res.json();
-          if (data.success) {
-            setResultMsg(data.message || 'เช็คชื่อสำเร็จ');
-            setPhase('success'); setActiveStep(4);
-          } else {
-            setErrorMsg(data.error || 'เกิดข้อผิดพลาด');
-            setPhase('error'); setActiveStep(2);
-          }
-        } catch {
-          setErrorMsg('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้');
-          setPhase('error'); setActiveStep(2);
-        }
+        await performVerify(lat, lng);
       },
       (err) => {
         setErrorMsg(err.code === 1
@@ -138,17 +175,29 @@ function StudentForm() {
           <div className="sp-brand-icon"><Icons.Logo /></div>
           <div>
             <p className="sp-brand-title">เช็คชื่อเข้าเรียน</p>
-            <p className="sp-brand-sub">QR Attendance System</p>
+            {sessionInfo?.course_name ? (
+              <p className="sp-brand-course">วิชา: {sessionInfo.course_name}</p>
+            ) : (
+              <p className="sp-brand-sub">QR Attendance System</p>
+            )}
           </div>
         </div>
 
         {/* Token status */}
-        <div className={`sp-token-badge ${token ? 'sp-token-ok' : 'sp-token-bad'}`}>
-          {token
-            ? <><span className="sp-token-dot" /><span>QR Code ถูกต้อง — พร้อมเช็คชื่อ</span></>
-            : <><Icons.Alert /><span>ไม่พบ Token — กรุณาสแกน QR Code ใหม่</span></>
-          }
-        </div>
+        {infoLoading ? (
+          <div className="sp-token-badge sp-token-info">
+            <span className="sp-token-dot" /><span>กำลังโหลดข้อมูลคาบเรียน…</span>
+          </div>
+        ) : (
+          <div className={`sp-token-badge ${token && !sessionInfo?.is_expired ? 'sp-token-ok' : 'sp-token-bad'}`}>
+            {token
+              ? (sessionInfo?.is_expired
+                  ? <><Icons.Alert /><span>QR Code หมดอายุแล้ว — กรุณาสแกนใหม่</span></>
+                  : <><span className="sp-token-dot" /><span>QR Code ถูกต้อง — {sessionInfo?.gps_enabled !== false ? 'ตรวจสอบ GPS' : 'พร้อมเช็คชื่อ (ไม่ใช้ GPS)'}</span></>)
+              : <><Icons.Alert /><span>ไม่พบ Token — กรุณาสแกน QR Code ใหม่</span></>
+            }
+          </div>
+        )}
 
         {/* Success state */}
         {phase === 'success' ? (
@@ -171,7 +220,7 @@ function StudentForm() {
                   placeholder="เช่น 6501234567"
                   value={studentId}
                   onChange={(e) => setStudentId(e.target.value)}
-                  disabled={isLoading}
+                  disabled={isLoading || infoLoading || sessionInfo?.is_expired}
                   autoComplete="off" autoFocus
                 />
               </div>
@@ -191,7 +240,7 @@ function StudentForm() {
               </div>
             )}
 
-            <button id="btn-checkin" type="submit" className="sp-btn" disabled={isLoading || !token}>
+            <button id="btn-checkin" type="submit" className="sp-btn" disabled={isLoading || !token || infoLoading || sessionInfo?.is_expired}>
               {isLoading
                 ? <span className="sp-btn-spinner" />
                 : <><Icons.Arrow />ยืนยันเช็คชื่อ</>
@@ -202,7 +251,11 @@ function StudentForm() {
 
             <div className="sp-notice">
               <Icons.MapPin />
-              <span>ระบบจะขอสิทธิ์เข้าถึง GPS เพื่อยืนยันว่าคุณอยู่ในห้องเรียน (ภายใน 50 เมตร)</span>
+              <span>
+                {sessionInfo && sessionInfo.gps_enabled === false
+                  ? 'ระบบเช็คชื่อด้วยตัวตนเครื่องและอุปกรณ์ (ไม่ต้องเปิดสิทธิ์ GPS)'
+                  : `ระบบจะขอสิทธิ์เข้าถึง GPS เพื่อยืนยันว่าคุณอยู่ในห้องเรียน (ภายใน ${sessionInfo?.max_distance || 50} เมตร)`}
+              </span>
             </div>
             <div className="sp-notice" style={{ marginTop: '4px' }}>
               <Icons.Shield />

@@ -93,6 +93,7 @@ export default function HistoryPage() {
   const [selectedSession, setSelectedSession] = useState(null);
   const [detailRecords, setDetailRecords] = useState([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedCourse, setSelectedCourse] = useState('ทั้งหมด');
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -121,6 +122,11 @@ export default function HistoryPage() {
     setDetailRecords([]);
   };
 
+  const uniqueCourses = Array.from(new Set(sessions.map((s) => s.course_name))).sort();
+  const filteredSessions = selectedCourse === 'ทั้งหมด'
+    ? sessions
+    : sessions.filter((s) => s.course_name === selectedCourse);
+
   return (
     <main className="hs-root">
       {/* Header */}
@@ -146,10 +152,39 @@ export default function HistoryPage() {
 
         {/* Session list */}
         <div className={`hs-card hs-sessions ${selectedSession ? 'hs-hidden-mobile' : ''}`}>
-          <div className="hs-card-title">
-            <Icons.Calendar />
-            <span>คาบเรียนทั้งหมด</span>
-            <span className="hs-count-badge">{sessions.length}</span>
+          <div className="hs-card-title-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+            <div className="hs-card-title" style={{ margin: 0 }}>
+              <Icons.Calendar />
+              <span>ประวัติคาบเรียน</span>
+              <span className="hs-count-badge">{filteredSessions.length}</span>
+            </div>
+            {uniqueCourses.length > 0 && (
+              <div className="hs-filter-wrapper">
+                <select
+                  className="hs-course-select"
+                  value={selectedCourse}
+                  onChange={(e) => {
+                    setSelectedCourse(e.target.value);
+                    closeDetail();
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    color: 'var(--text-primary, #ffffff)',
+                    fontSize: '13px',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="ทั้งหมด">วิชาทั้งหมด</option>
+                  {uniqueCourses.map((c, idx) => (
+                    <option key={idx} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -157,14 +192,14 @@ export default function HistoryPage() {
               <div className="sp-dots"><span/><span/><span/></div>
               <p>กำลังโหลด...</p>
             </div>
-          ) : sessions.length === 0 ? (
+          ) : filteredSessions.length === 0 ? (
             <div className="hs-empty">
               <Icons.Calendar />
-              <p>ยังไม่มีคาบเรียน</p>
+              <p>{selectedCourse === 'ทั้งหมด' ? 'ยังไม่มีคาบเรียน' : 'ไม่มีคาบเรียนในวิชานี้'}</p>
             </div>
           ) : (
             <div className="hs-list">
-              {sessions.map((s) => (
+              {filteredSessions.map((s) => (
                 <button
                   key={s.id}
                   className={`hs-session-item ${selectedSession?.id === s.id ? 'active' : ''}`}

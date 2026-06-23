@@ -76,12 +76,23 @@ export default function TeacherPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [locationInfo, setLocationInfo] = useState(null);
   const [sessionTime, setSessionTime] = useState(0);
+  const [gpsEnabled, setGpsEnabled] = useState(true);
+  const [maxDistance, setMaxDistance] = useState(50);
+  const [previousCourses, setPreviousCourses] = useState([]);
 
   const tokenRef = useRef(null);
   const pollRef = useRef(null);
   const clockRef = useRef(null);
 
-  useEffect(() => { setBaseUrl(window.location.origin); }, []);
+  useEffect(() => {
+    setBaseUrl(window.location.origin);
+    fetch('/api/teacher/courses')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) setPreviousCourses(data.courses);
+      })
+      .catch((err) => console.error('Failed to fetch courses:', err));
+  }, []);
 
   const generateToken = useCallback(async (sid) => {
     try {
@@ -105,43 +116,64 @@ export default function TeacherPage() {
     } catch { }
   }, []);
 
+  const createSession = async (room_lat, room_lng) => {
+    try {
+      const res = await fetch('/api/teacher/session', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          course_name: courseName.trim(),
+          room_lat,
+          room_lng,
+          gps_enabled: gpsEnabled,
+          max_distance: parseInt(maxDistance) || 50,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      const sid = data.session.id;
+      setSessionId(sid);
+      setSessionInfo(data.session);
+      setStatus('running');
+      setIsRunning(true);
+      setSessionTime(0);
+
+      await generateToken(sid);
+      tokenRef.current = setInterval(() => generateToken(sid), REFRESH_INTERVAL_SEC * 1000);
+      pollRef.current = setInterval(() => pollAttendance(sid), POLL_INTERVAL_MS);
+      clockRef.current = setInterval(() => setSessionTime(t => t + 1), 1000);
+
+      const trimmedName = courseName.trim();
+      setPreviousCourses((prev) =>
+        prev.includes(trimmedName) ? prev : [...prev, trimmedName].sort()
+      );
+    } catch (err) {
+      setStatus('error');
+      setErrorMsg(err.message);
+    }
+  };
+
   const handleStart = () => {
     if (!courseName.trim()) { setErrorMsg('กรุณากรอกชื่อวิชา'); return; }
     setErrorMsg('');
-    setStatus('locating');
 
+    if (!gpsEnabled) {
+      setStatus('creating');
+      createSession(null, null);
+      return;
+    }
+
+    setStatus('locating');
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude: room_lat, longitude: room_lng, accuracy } = pos.coords;
         setLocationInfo({ lat: room_lat, lng: room_lng, accuracy: Math.round(accuracy) });
         setStatus('creating');
-        try {
-          const res = await fetch('/api/teacher/session', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ course_name: courseName.trim(), room_lat, room_lng }),
-          });
-          const data = await res.json();
-          if (!data.success) throw new Error(data.error);
-
-          const sid = data.session.id;
-          setSessionId(sid);
-          setSessionInfo(data.session);
-          setStatus('running');
-          setIsRunning(true);
-          setSessionTime(0);
-
-          await generateToken(sid);
-          tokenRef.current = setInterval(() => generateToken(sid), REFRESH_INTERVAL_SEC * 1000);
-          pollRef.current = setInterval(() => pollAttendance(sid), POLL_INTERVAL_MS);
-          clockRef.current = setInterval(() => setSessionTime(t => t + 1), 1000);
-        } catch (err) {
-          setStatus('error');
-          setErrorMsg(err.message);
-        }
+        await createSession(room_lat, room_lng);
       },
       () => {
         setStatus('error');
-        setErrorMsg('ไม่สามารถดึงตำแหน่ง GPS ได้ กรุณาอนุญาตการเข้าถึง Location');
+        setErrorMsg('ไม่สามารถดึงตำแหน่ง GPS ได้ กรุณาอนุญาตสิทธิ์เข้าถึง หรือปิดการตรวจสอบ GPS');
       },
       { enableHighAccuracy: true, timeout: 15000 }
     );
@@ -227,12 +259,47 @@ export default function TeacherPage() {
                 <label htmlFor="course-name" className="tp-label">ชื่อวิชา / คาบเรียน</label>
                 <input
                   id="course-name" type="text" className="tp-input"
-                  placeholder=""
+                  placeholder="พิมพ์หรือเลือกวิชาเก่า..."
                   value={courseName}
                   onChange={(e) => setCourseName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleStart()}
                   disabled={isLoading}
+                  list="previous-courses"
+                  autoComplete="off"
                 />
+                <datalist id="previous-courses">
+                  {previousCourses.map((c, idx) => (
+                    <option key={idx} value={c} />
+                  ))}
+                </datalist>
+              </div>
+
+              <div className="tp-gps-config">
+                <label className="tp-checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={gpsEnabled}
+                    onChange={(e) => setGpsEnabled(e.target.checked)}
+                    disabled={isLoading}
+                  />
+                  <span>เปิดใช้งานการตรวจสอบ GPS</span>
+                </label>
+
+                {gpsEnabled && (
+                  <div className="tp-field tp-distance-field">
+                    <label htmlFor="max-distance" className="tp-label">ระยะห่างสูงสุดจากห้องเรียน (เมตร)</label>
+                    <input
+                      id="max-distance"
+                      type="number"
+                      min="5"
+                      max="1000"
+                      className="tp-input"
+                      value={maxDistance}
+                      onChange={(e) => setMaxDistance(e.target.value)}
+                      disabled={isLoading}
+                    />
+                  </div>
+                )}
               </div>
 
               {errorMsg && (
@@ -251,7 +318,9 @@ export default function TeacherPage() {
                 </div>
                 <div className="tp-feature-item">
                   <span className="tp-feature-dot" />
-                  ยืนยันตำแหน่ง GPS ภายใน 50 เมตร
+                  {gpsEnabled
+                    ? `ยืนยันตำแหน่ง GPS ภายใน ${maxDistance || 50} เมตร`
+                    : 'ปิดการเช็คพิกัด GPS — ตรวจจับเฉพาะเครื่องและอุปกรณ์'}
                 </div>
                 <div className="tp-feature-item">
                   <span className="tp-feature-dot" />

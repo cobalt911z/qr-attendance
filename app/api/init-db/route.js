@@ -21,9 +21,21 @@ export async function GET() {
         token_expires_at TIMESTAMP,
         room_lat         DECIMAL(10, 7),
         room_lng         DECIMAL(10, 7),
+        gps_enabled      BOOLEAN DEFAULT TRUE,
+        max_distance     INTEGER DEFAULT 50,
         created_at       TIMESTAMP DEFAULT NOW(),
         is_active        BOOLEAN DEFAULT TRUE
       )
+    `;
+
+    // Migration statements for existing DBs
+    await sql`
+      ALTER TABLE "ClassSessions" 
+      ADD COLUMN IF NOT EXISTS gps_enabled BOOLEAN DEFAULT TRUE
+    `;
+    await sql`
+      ALTER TABLE "ClassSessions" 
+      ADD COLUMN IF NOT EXISTS max_distance INTEGER DEFAULT 50
     `;
 
     // AttendanceRecords table

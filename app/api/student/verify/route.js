@@ -1,28 +1,19 @@
 import { getDb } from '@/lib/db';
 import { haversineDistance } from '@/lib/haversine';
 
-const MAX_DISTANCE_METRES = 50; // students must be within 50 m of classroom
-
 /**
  * POST /api/student/verify
  * Body: { token, student_id, lat, lng, fingerprint }
- *
- * Anti-cheat checks (in order):
- *  1. Token must exist in ClassSessions
- *  2. Token must not be expired (server-side check)
- *  3. Student GPS must be within 50 m of room GPS
- *  4. student_id must not already have checked in to this session
- *  5. device fingerprint must not already be used in this session
  */
 export async function POST(request) {
   try {
     const body = await request.json();
     const { token, student_id, lat, lng, fingerprint } = body;
 
-    // ── Validate required fields ─────────────────────────────────────────────
-    if (!token || !student_id || lat == null || lng == null || !fingerprint) {
+    // ── Validate basic required fields ─────────────────────────────────────────
+    if (!token || !student_id || !fingerprint) {
       return Response.json(
-        { success: false, error: 'กรุณาส่งข้อมูลให้ครบ (token, student_id, lat, lng, fingerprint)' },
+        { success: false, error: 'กรุณาส่งข้อมูลให้ครบ (token, student_id, fingerprint)' },
         { status: 400 }
       );
     }
@@ -31,7 +22,7 @@ export async function POST(request) {
 
     // ── 1 & 2: Find session by token and check expiry ────────────────────────
     const sessions = await sql`
-      SELECT id, room_lat, room_lng, token_expires_at
+      SELECT id, room_lat, room_lng, gps_enabled, max_distance, token_expires_at
       FROM "ClassSessions"
       WHERE current_token = ${token}
         AND is_active = true
@@ -55,29 +46,43 @@ export async function POST(request) {
       );
     }
 
-    // ── 3: GPS proximity check ───────────────────────────────────────────────
-    if (session.room_lat == null || session.room_lng == null) {
-      return Response.json(
-        { success: false, error: 'ยังไม่ได้ตั้งค่าพิกัดห้องเรียน' },
-        { status: 400 }
-      );
-    }
+    // ── 3: GPS proximity check (if enabled) ───────────────────────────────────
+    const isGpsEnabled = session.gps_enabled !== false;
+    let distance = null;
 
-    const distance = haversineDistance(
-      parseFloat(lat),
-      parseFloat(lng),
-      parseFloat(session.room_lat),
-      parseFloat(session.room_lng)
-    );
+    if (isGpsEnabled) {
+      if (lat == null || lng == null) {
+        return Response.json(
+          { success: false, error: 'กรุณาอนุญาตสิทธิ์เข้าถึงพิกัด GPS เพื่อยืนยันตัวตน' },
+          { status: 400 }
+        );
+      }
 
-    if (distance > MAX_DISTANCE_METRES) {
-      return Response.json(
-        {
-          success: false,
-          error: `ตำแหน่งของคุณอยู่ห่างจากห้องเรียน ${Math.round(distance)} เมตร (ต้องอยู่ภายใน ${MAX_DISTANCE_METRES} เมตร)`,
-        },
-        { status: 403 }
+      if (session.room_lat == null || session.room_lng == null) {
+        return Response.json(
+          { success: false, error: 'ยังไม่ได้ตั้งค่าพิกัดห้องเรียนบนเซิร์ฟเวอร์' },
+          { status: 400 }
+        );
+      }
+
+      distance = haversineDistance(
+        parseFloat(lat),
+        parseFloat(lng),
+        parseFloat(session.room_lat),
+        parseFloat(session.room_lng)
       );
+
+      const maxLimit = session.max_distance || 50;
+
+      if (distance > maxLimit) {
+        return Response.json(
+          {
+            success: false,
+            error: `ตำแหน่งของคุณอยู่ห่างจากห้องเรียน ${Math.round(distance)} เมตร (ต้องอยู่ภายใน ${maxLimit} เมตร)`,
+          },
+          { status: 403 }
+        );
+      }
     }
 
     // ── 4 & 5: Duplicate check (student_id + fingerprint) ───────────────────
@@ -107,14 +112,16 @@ export async function POST(request) {
       INSERT INTO "AttendanceRecords"
         (session_id, student_id, student_lat, student_lng, device_fingerprint, check_in_time)
       VALUES
-        (${session.id}, ${student_id}, ${lat}, ${lng}, ${fingerprint}, NOW())
+        (${session.id}, ${student_id}, ${isGpsEnabled ? lat : null}, ${isGpsEnabled ? lng : null}, ${fingerprint}, NOW())
     `;
 
     return Response.json({
       success: true,
-      message: `เช็คชื่อสำเร็จ! (ระยะห่าง ${Math.round(distance)} เมตรจากห้องเรียน)`,
+      message: isGpsEnabled
+        ? `เช็คชื่อสำเร็จ! (ระยะห่าง ${Math.round(distance)} เมตรจากห้องเรียน)`
+        : 'เช็คชื่อสำเร็จ!',
       student_id,
-      distance_m: Math.round(distance),
+      distance_m: isGpsEnabled ? Math.round(distance) : null,
     });
   } catch (error) {
     console.error('verify error:', error);
@@ -124,3 +131,4 @@ export async function POST(request) {
     );
   }
 }
+

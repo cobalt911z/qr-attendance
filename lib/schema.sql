@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS "ClassSessions" (
   token_expires_at TIMESTAMP,
   room_lat         DECIMAL(10, 7),
   room_lng         DECIMAL(10, 7),
+  gps_enabled      BOOLEAN DEFAULT TRUE,
+  max_distance     INTEGER DEFAULT 50,
   created_at       TIMESTAMP DEFAULT NOW(),
   is_active        BOOLEAN DEFAULT TRUE
 );
